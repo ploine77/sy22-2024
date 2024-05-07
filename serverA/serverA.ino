@@ -5,6 +5,7 @@
 #include <string.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
+#include <esp_system.h>
 
 
 
@@ -22,10 +23,8 @@ IPAddress subnet(255,255,255,0);
 const char* mac_client = "C0:49:EF:CD:29:30";
 bool client_connected_to_a;
 bool client_connected_to_b;
-bool client_not_connected;
 int client_position;
 
-float internal_temp;
 
 AsyncWebServer server(80);
 
@@ -71,29 +70,24 @@ bool is_this_mac_address_connected(const char* mac_client)
   
 }
 
-// float esp_internal_temp()
-// {
-//   temperature_sensor_enable();
-//   return temperature_sensor_get_celsius();
-// }
+float esp_internal_temp() {
+  return (temperatureRead() - 32) / 1.8; // Température interne en degrés Celsius
+}
 
-void setup()
-{
-  Serial.begin(115200);
-  Serial.println("\n[*] Creating Access point B");
-  WiFi.mode(WIFI_AP);
-  WiFi.softAPConfig(local_ip, gateway, subnet);
-  WiFi.softAP(ssid, password, channel, hide_SSID, max_connection);
-  Serial.print("[+] Access Point B created with IP gateway ");
-  Serial.println(WiFi.softAPIP());
+size_t available_memory() {
+  return ESP.getFreeHeap(); // Mémoire disponible en octets
+}
 
-  //Serveur HTTP
+void HTTPSeverSetup() {
+  // WebUI
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    String response = "<h1>Bienvenue sur l'ESP8266</h1>";
-    response += "<p>Adresse IP : " + WiFi.localIP().toString() + "</p>";
-    //response += "<p>" + esp_internal_temp() +  "</p> ";
+    String response = "<h1>Bienvenue sur l'ESP32 A</h1>";
+    response += "<p>IP Address (AP): " + WiFi.softAPIP().toString() + "</p>";
+    response += "<p>(Deprecated)Internal Temperature : " + String(esp_internal_temp()) + "C</p>";
+    response += "<p>Available memory : " + String(available_memory()) + " bytes</p>";
     request->send(200, "text/html", response);
   });
+  // API Server
   server.on("/message", HTTP_POST, [](AsyncWebServerRequest *request){
     // Traitement du message reçu
     // Exemple : affichage du contenu du message dans la console série
@@ -102,14 +96,27 @@ void setup()
       message = request->getParam("message", true)->value();
       Serial.println("Message reçu : " + message);
     }
-    request->send(200, "text/plain", "Message reçu avec succès");
+    request->send(200, "text/plain", "Message reçu avec succès par A");
   });
 
   server.begin();
-  Serial.println("Server started");
+  Serial.println("API HTTP Server A started");
     
 }
 
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println("\n[*] Creating Access point A");
+  WiFi.mode(WIFI_AP);
+  WiFi.softAPConfig(local_ip, gateway, subnet);
+  WiFi.softAP(ssid, password, channel, hide_SSID, max_connection);
+  Serial.print("[+] Access Point A created with IP gateway ");
+  Serial.println(WiFi.softAPIP());
+  Serial.print("Wifi setup successfull");
+  
+  HTTPSeverSetup();
+}
 void loop()
 {
 
