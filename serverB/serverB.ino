@@ -7,6 +7,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <esp_system.h>
+#include <ArduinoJson.h>
 
 // Variable Init //
 
@@ -25,12 +26,27 @@ IPAddress gateway(192, 168, 1, 1);    // Adresse de la passerelle (habituellemen
 IPAddress subnet(255, 255, 255, 0);   // Masque de sous-réseau
 
 
-//const char* mac_client = "C0:49:EF:CD:29:30";
-const char* mac_client = "06:2C:78:F4:46:D2"; //Iphone
+const char* mac_client = "C0:49:EF:CD:29:30";
+//const char* mac_client = "06:2C:78:F4:46:D2"; //Iphone
 bool client_connected_to_b;
-int client_position;
+int client_position[2];
 
 AsyncWebServer server(80);
+
+void jsonData(){
+  StaticJsonDocument<200> jsonDoc; // Taille de 200 octets pour le document JSON
+  jsonDoc["client_connected_to_b"] = client_connected_to_b;
+  JsonObject clientPositionObj = jsonDoc.createNestedObject("client_position");
+  // Ajouter les valeurs de client_position à l'objet JSON
+  clientPositionObj["x"] = client_position[0];
+  clientPositionObj["y"] = client_position[1];
+
+  // Convertir l'objet JSON en chaîne JSON
+  String jsonString;
+  serializeJson(jsonDoc, jsonString);
+  Serial.println(jsonString);
+
+}
 
 float esp_internal_temp() {
   return (temperatureRead() - 32) / 1.8; // Température interne en degrés Celsius
@@ -118,7 +134,6 @@ void HTTPSeverSetup() {
     response += "<p>(Deprecated)Internal Temperature : " + String(esp_internal_temp()) + "C</p>";
     response += "<p>Available memory : " + String(available_memory()) + " bytes</p>";
     response += "<p>Client Connected to B : " + String(client_connected_to_b) + "</p>";
-    response += "<p>Client Position : " + String(client_position) + "</p>";
     request->send(200, "text/html", response);
   });
   // API Server
@@ -130,7 +145,7 @@ void HTTPSeverSetup() {
       message = request->getParam("message", true)->value();
       Serial.println("Message reçu : " + message);
     }
-    request->send(200, "text/plain", "Message reçu avec succès par A");
+    request->send(200, "text/plain", "Message reçu avec succès par B");
   });
 
   server.begin();
@@ -169,7 +184,13 @@ void setup()
 }
 
 void loop() { 
-  sendData("http://192.168.0.1","/message","HeyFromb");
+  if (is_this_mac_address_connected(mac_client)){
+    client_connected_to_b = true;
+  }
+  else {
+    client_connected_to_b = false;
+  }
+  sendData("http://192.168.0.1","/message","fromsrvb/client_connected_to_b:" + client_connected_to_b);
   delay(5000);
   
   // display_connected_devices();

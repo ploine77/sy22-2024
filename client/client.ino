@@ -6,12 +6,14 @@
 
 const char* ssidA = "servera";
 const char* passwordA = "srvapass10";
+const char* Host_NameA = "http://192.168.0.1";
 const char* ssidB = "serverb";
 const char* passwordB = "srvbpass10";
+const char* Host_NameB = "http://192.168.1.1";
 
-// Coordonnées des serveurs
-float serverAPosition[2] = {0.0, 0.0}; // Par exemple, (0, 0)
-float serverBPosition[2] = {10.0, 0.0}; // Par exemple, (10, 0)
+char ConnectedTo;
+const char* host;
+
 
 void sendData(String HOST_NAME, String PATH_NAME, String queryString) {
   HTTPClient http;
@@ -42,15 +44,19 @@ void connectToBestWiFi() {
   int32_t rssiA = scanAndGetRSSI(ssidA);
   int32_t rssiB = scanAndGetRSSI(ssidB);
 
-  Serial.print("RSSI de servera: ");
-  Serial.println(rssiA);
-  Serial.print("RSSI de serverb: ");
-  Serial.println(rssiB);
+  // Serial.print("RSSI de servera: ");
+  // Serial.println(rssiA);
+  // Serial.print("RSSI de serverb: ");
+  // Serial.println(rssiB);
 
   if (rssiA > rssiB) {
     connectToWiFi(ssidA, passwordA);
+    ConnectedTo = 'A';
+    host = Host_NameA;
   } else {
     connectToWiFi(ssidB, passwordB);
+    ConnectedTo = 'B';
+    host = Host_NameB;
   }
 }
 
@@ -81,43 +87,6 @@ void connectToWiFi(const char* ssid, const char* password) {
   Serial.println(WiFi.localIP());
 }
 
-void getPosition(){
-  int32_t rssiA = scanAndGetRSSI(ssidA);
-  int32_t rssiB = scanAndGetRSSI(ssidB);
-  float distanceA = calculateDistance(rssiA);
-  float distanceB = calculateDistance(rssiB);
-
-  // Calculer la position de l'ESP
-  float clientPosition[2] = {0.0, 0.0}; // Position initiale, peut être mise à jour avec des valeurs réelles
-
-  // Trilatération pour estimer la position de l'ESP
-  // Dans ce cas, nous supposerons que la position de l'ESP est le point d'intersection des cercles
-  trilaterate(clientPosition, serverAPosition, serverBPosition, distanceA, distanceB);
-
-  Serial.print("Position de l'ESP (x, y): ");
-  Serial.print(clientPosition[0]);
-  Serial.print(", ");
-  Serial.println(clientPosition[1]);
-
-}
-
-float calculateDistance(int32_t rssi) {
-  // À remplacer par une formule de conversion RSSI-distance appropriée
-  // Cette formule peut dépendre de plusieurs facteurs, y compris la puissance de transmission des routeurs et les conditions environnementales
-  // Cela pourrait nécessiter des tests et des ajustements pour correspondre à votre environnement spécifique
-  return pow(10, (-rssi - 60) / (10 * 2.0));
-}
-
-void trilaterate(float clientPosition[], float serverAPosition[], float serverBPosition[], float distanceA, float distanceB) {
-  // Calculer les coordonnées du point d'intersection des cercles
-  float d = sqrt(pow((serverBPosition[0] - serverAPosition[0]), 2) + pow((serverBPosition[1] - serverAPosition[1]), 2));
-  float a = (pow(distanceA, 2) - pow(distanceB, 2) + pow(d, 2)) / (2 * d);
-  float h = sqrt(pow(distanceA, 2) - pow(a, 2));
-  
-  clientPosition[0] = serverAPosition[0] + (a * (serverBPosition[0] - serverAPosition[0])) / d;
-  clientPosition[1] = serverAPosition[1] + (a * (serverBPosition[1] - serverAPosition[1])) / d;
-}
-
 void setup() {
   Serial.begin(115200);
   connectToBestWiFi();
@@ -126,6 +95,5 @@ void setup() {
 void loop() {
   delay(10000); // Attente de 10 secondes
   connectToBestWiFi();
-  //getPosition();
-  serial.print(calculateDistance(scanAndGetRSSI(ssidA)))
+  sendData(String(host),"/message","fromclient/rssiA:" + String(scanAndGetRSSI(ssidA)) + "/rssiB:" + String(scanAndGetRSSI(ssidB)));
 }
