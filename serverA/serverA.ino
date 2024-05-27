@@ -25,6 +25,9 @@ bool client_connected_to_a;
 bool client_connected_to_b;
 int client_position;
 
+// Username and Password for Basic Authentication
+const char* http_username = "admin";
+const char* http_password = "password";
 
 AsyncWebServer server(80);
 
@@ -78,6 +81,10 @@ size_t available_memory() {
   return ESP.getFreeHeap(); // Mémoire disponible en octets
 }
 
+void process_msg(String message){
+
+}
+
 void HTTPSeverSetup() {
   // WebUI
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -89,12 +96,15 @@ void HTTPSeverSetup() {
   });
   // API Server
   server.on("/message", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
     // Traitement du message reçu
     // Exemple : affichage du contenu du message dans la console série
     String message;
     if (request->hasParam("message", true)) {
       message = request->getParam("message", true)->value();
-      Serial.println("Message reçu : " + message);
+      process_msg(message)
+      //Serial.println("Message reçu : " + message);
     }
     request->send(200, "text/plain", "Message reçu avec succès par A");
   });
@@ -119,7 +129,12 @@ void setup()
 }
 void loop()
 {
-
+  if (is_this_mac_address_connected(mac_client)){
+    client_connected_to_a = true;
+  }
+  else {
+    client_connected_to_a = false;
+  }
 
 
   //display_connected_devices();

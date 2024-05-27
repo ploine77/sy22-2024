@@ -26,12 +26,16 @@ IPAddress gateway(192, 168, 1, 1);    // Adresse de la passerelle (habituellemen
 IPAddress subnet(255, 255, 255, 0);   // Masque de sous-réseau
 
 
-const char* mac_client = "C0:49:EF:CD:29:30";
+const char* mac_client = "44:17:93:E3:3D:C4";
 //const char* mac_client = "06:2C:78:F4:46:D2"; //Iphone
 bool client_connected_to_b;
 int client_position[2];
 
 AsyncWebServer server(80);
+
+// Username and Password for Basic Authentication
+const char* http_username = "admin";
+const char* http_password = "password";
 
 void jsonData(){
   StaticJsonDocument<200> jsonDoc; // Taille de 200 octets pour le document JSON
@@ -102,7 +106,7 @@ bool is_this_mac_address_connected(const char* mac_client)
 void sendData(String HOST_NAME, String PATH_NAME, String queryString) 
 {
   HTTPClient http;
-  http.begin(HOST_NAME + PATH_NAME);
+  http.begin("http://" + String(http_username) + ":" + String(http_password) + "@" + String(HOST_NAME) + String(PATH_NAME));
   http.addHeader("Content-Type", "application/x-www-form-urlencoded");
   int httpCode = http.POST("message=" + queryString);
   
@@ -111,7 +115,7 @@ void sendData(String HOST_NAME, String PATH_NAME, String queryString)
     // file found at server
     if (httpCode == HTTP_CODE_OK) {
       String payload = http.getString();
-      Serial.println("Response from server A :" + payload);
+      Serial.println("Response : " + payload);
     } else {
       // HTTP header has been send and Server response header has been handled
       Serial.printf("[HTTP] POST ... code: %d\n", httpCode);
@@ -123,6 +127,19 @@ void sendData(String HOST_NAME, String PATH_NAME, String queryString)
   http.end();
 
 
+}
+
+void process_msg(String message){
+  DynamicJsonDocument doc(200); // Taille du document JSON en octets
+  deserializeJson(doc, message);
+  if (doc.containsKey("client")) {
+    DynamicJsonDocument jsonDoc(200);
+    jsonDoc["serverb"]["connection_data"]["mac"] = String(WiFi.macAddress());
+    jsonDoc["serverb"]["client_info"][doc["client"]["connection_data"]["mac"]] = ;
+    // Convert JSON to string
+    String jsonString;
+    serializeJson(jsonDoc, jsonString);
+    sendData("192.168.0.1","/message",message));
 }
 
 void HTTPSeverSetup() {
@@ -138,12 +155,15 @@ void HTTPSeverSetup() {
   });
   // API Server
   server.on("/message", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
     // Traitement du message reçu
     // Exemple : affichage du contenu du message dans la console série
     String message;
     if (request->hasParam("message", true)) {
       message = request->getParam("message", true)->value();
-      Serial.println("Message reçu : " + message);
+      process_msg(message);
+      //Serial.println("Message reçu : " + message);
     }
     request->send(200, "text/plain", "Message reçu avec succès par B");
   });
@@ -190,7 +210,8 @@ void loop() {
   else {
     client_connected_to_b = false;
   }
-  sendData("http://192.168.0.1","/message","fromsrvb/client_connected_to_b:" + client_connected_to_b);
+  //Serial.print(is_this_mac_address_connected(mac_client));
+  //sendData("http://192.168.0.1","/message","fromsrvb/client_connected_to_b:" + String(client_connected_to_b));
   delay(5000);
   
   // display_connected_devices();
