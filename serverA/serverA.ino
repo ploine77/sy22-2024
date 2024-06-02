@@ -7,6 +7,7 @@
 #include <ESPAsyncWebServer.h>
 #include <esp_system.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
 
 
 
@@ -123,16 +124,60 @@ void process_msg(String message){
   }
 }
 
+void sendData(String HOST_NAME, String PATH_NAME, String queryString) {
+  HTTPClient http;
+  http.begin("http://" + String(http_username) + ":" + String(http_password) + "@" + String(HOST_NAME) + String(PATH_NAME));
+  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
+  int httpCode = http.POST("message=" + queryString);
+
+  // httpCode will be negative on error
+  if (httpCode > 0) {
+    // file found at server
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      //Serial.println("Response : " + payload);
+    } else {
+      // HTTP header has been send and Server response header has been handled
+      Serial.printf("[HTTP] POST ... code: %d\n", httpCode);
+    }
+  } else {
+    Serial.printf("[HTTP] POST ... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
+}
+
+String pincontroljson(int pinupmber, bool pinstat) {
+  // Déclarez un document JSON avec une taille plus grande si nécessaire
+  DynamicJsonDocument jsonDoc(256);
+  // Ajoutez les valeurs au document JSON
+  jsonDoc["Source"] = "serva";
+  jsonDoc["Destination"] = "Client";
+  jsonDoc["data"]["action"]["pinupmber"] = pinupmber;
+  jsonDoc["data"]["action"]["pinstat"] = pinstat;
+  // Convertir le document JSON en chaîne
+  String jsonString;
+  serializeJson(jsonDoc, jsonString);
+  // Vérifiez si la sérialisation s'est bien déroulée
+  if (jsonString.length() == 0) {
+    Serial.println("Erreur: JSON vide.");
+  }
+  return jsonString;
+}
+
 void startFunction(AsyncWebServerRequest *request) {
   // Code pour la fonction start
   Serial.println("Start LED 1");
   request->send(200, "text/plain", "Started");
+  sendData("192.168.0.3","/message",pincontroljson(18,1));
+  Serial.println("Message sent to the client");
 }
 
 void stopFunction(AsyncWebServerRequest *request) {
   // Code pour la fonction stop
   Serial.println("Stop LED 1");
   request->send(200, "text/plain", "Stopped");
+  sendData("192.168.0.2","/message",pincontroljson(18,0));
+  Serial.println("Message sent to the client");
 }
 
 void HTTPSeverSetup() {

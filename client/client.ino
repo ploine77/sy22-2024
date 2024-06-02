@@ -2,6 +2,7 @@
 #include "esp_wifi.h"
 #include <string.h>
 #include <HTTPClient.h>
+#include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <ArduinoJson.h>
 
@@ -26,6 +27,61 @@ struct RSSIValues {
 
 // Déclaration globale de rssiValues
 RSSIValues rssiValues;
+
+AsyncWebServer server(80);
+
+void process_msg(String message){
+  DynamicJsonDocument doc(200); // Taille du document JSON en octets
+  deserializeJson(doc, message);
+  if (doc["Destination"] == "Client"){
+    if (doc["data"] && doc["data"]["action"]){
+      int pinNumber = doc["data"]["action"]["pinupmber"];
+      bool pinStatus = doc["data"]["action"]["pinstat"];
+
+      Serial.print("Pin Number: ");
+      Serial.println(pinNumber);
+      Serial.print("Pin Status: ");
+      Serial.println(pinStatus);
+      // Set the pin mode to OUTPUT
+      pinMode(pinNumber, OUTPUT);
+
+      // Set the pin state based on the pinStatus
+      digitalWrite(pinNumber, pinStatus ? HIGH : LOW);
+
+    }
+  }
+}
+
+void HTTPSeverSetup() {
+  // WebUI
+  // server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  //   String response = "<h1>Bienvenue sur l'ESP32 B</h1>";
+  //   response += "<p>IP Address (AP) : " + WiFi.softAPIP().toString() + "</p>";
+  //   response += "<p>IP Adress (STATION) : " + WiFi.localIP().toString() + "</p>";
+  //   response += "<p>(Deprecated)Internal Temperature : " + String(esp_internal_temp()) + "C</p>";
+  //   response += "<p>Available memory : " + String(available_memory()) + " bytes</p>";
+  //   response += "<p>Client Connected to B : " + String(client_connected_to_b) + "</p>";
+  //   request->send(200, "text/html", response);
+  // });
+  // API Server
+  server.on("/message", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!request->authenticate(http_username, http_password))
+      return request->requestAuthentication();
+    // Traitement du message reçu
+    // Exemple : affichage du contenu du message dans la console série
+    String message;
+    if (request->hasParam("message", true)) {
+      message = request->getParam("message", true)->value();
+      process_msg(message);
+      Serial.println("Message reçu : " + message);
+    }
+    request->send(200, "text/plain", "Message reçu avec succès par le client");
+  });
+
+  server.begin();
+  Serial.println("API HTTP Client started");
+    
+}
 
 // Send data over HTTP API
 void sendData(String HOST_NAME, String PATH_NAME, String queryString) {
@@ -105,6 +161,7 @@ int32_t scanAndGetRSSI(const char* ssid) {
   }
   return INT_MIN;
 }
+
 RSSIValues scanAndGetRSSIs(const char* ssidA, const char* ssidB) {
   RSSIValues rssiValues = {INT_MIN, INT_MIN};
   int numNetworks = WiFi.scanNetworks();
@@ -174,12 +231,15 @@ void connectToWiFi(const char* ssid, const char* password) {
 void setup() {
   Serial.begin(115200);
   Serial.println("### THIS IS THE CLIENT ###");
-  //connectToBestWiFi();
+  RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB);
+  connectToBestWiFi(rssiValues.rssiA, rssiValues.rssiB);
+  HTTPSeverSetup();
+  
   //Serial.println(WiFi.macAddress());
 }
 
 void loop() {
-  delay(1000); // Attente de 1 seconde
+  delay(3000); // Attente de 1 seconde
   // Update rssiValues
   RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB);
   Serial.print("RSSIA :" + String(rssiValues.rssiA));

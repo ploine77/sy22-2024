@@ -27,7 +27,7 @@ IPAddress subnet(255, 255, 255, 0);   // Masque de sous-réseau
 
 
 String mac_client = "44:17:93:E3:3D:C4";
-String ip_client;
+String ip_client = "192.168.1.2";
 //const char* mac_client = "06:2C:78:F4:46:D2"; //Iphone
 bool client_connected_to_b;
 int client_position[2];
@@ -117,9 +117,11 @@ void sendData(String HOST_NAME, String PATH_NAME, String queryString) {
     } else {
       // HTTP header has been send and Server response header has been handled
       Serial.printf("[HTTP] POST ... code: %d\n", httpCode);
+      Serial.println(" with string :" + queryString);
     }
   } else {
     Serial.printf("[HTTP] POST ... failed, error: %s\n", http.errorToString(httpCode).c_str());
+    Serial.println(" with string :" + queryString);
   }
 
   http.end();
@@ -130,7 +132,7 @@ void sendData(String HOST_NAME, String PATH_NAME, String queryString) {
 void process_msg(String message){
   DynamicJsonDocument doc(200); // Taille du document JSON en octets
   deserializeJson(doc, message);
-  if (doc["destination"] != "servb"){
+  if (doc["Destination"] == "serva"){
     sendData("192.168.0.1","/message",message);
     if (doc["data"]["connection_data"]["ConnectedTo"].as<String>() == "B"){
       client_connected_to_b = true;
@@ -140,6 +142,10 @@ void process_msg(String message){
     }
     mac_client = doc["data"]["connection_data"]["mac"].as<String>();
     ip_client = doc["data"]["connection_data"]["ip"].as<String>();
+  }
+  if (doc["Destination"] == "Client"){
+    sendData(ip_client,"/message",message);
+
   }
 
 }
@@ -165,7 +171,7 @@ void HTTPSeverSetup() {
     if (request->hasParam("message", true)) {
       message = request->getParam("message", true)->value();
       process_msg(message);
-      //Serial.println("Message reçu : " + message);
+      Serial.println("Message reçu : " + message);
     }
     request->send(200, "text/plain", "Message reçu avec succès par B");
   });
