@@ -6,6 +6,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <esp_system.h>
+#include <ArduinoJson.h>
 
 
 
@@ -14,17 +15,22 @@ const char* ssid     = "servera";
 const char* password = "srvapass10";
 const int   channel        = 10;                        // WiFi Channel number between 1 and 13
 const bool  hide_SSID      = false;                     // To disable SSID broadcast -> SSID will not appear in a basic WiFi scan
-const int   max_connection = 2;                         // Maximum simultaneous connected clients on the AP
+const int   max_connection = 3;                         // Maximum simultaneous connected clients on the AP
 
 IPAddress local_ip(192,168,0,1);
 IPAddress gateway(192,168,0,1);
 IPAddress subnet(255,255,255,0);
 
 const char* mac_client = "C0:49:EF:CD:29:30";
+
 bool client_connected_to_a;
 bool client_connected_to_b;
 int client_position;
-
+struct RSSIValues {
+  String rssiA;
+  String rssiB;
+};
+RSSIValues rssiValues;
 // Username and Password for Basic Authentication
 const char* http_username = "admin";
 const char* http_password = "password";
@@ -82,7 +88,51 @@ size_t available_memory() {
 }
 
 void process_msg(String message){
+  
+  DynamicJsonDocument doc(200); // Taille du document JSON en octets
+  deserializeJson(doc, message);
+  Serial.println(String(message));
+  if (doc["Destination"].as<String>() == "serva"){
+    
+    if (doc["data"]["connection_data"]["ConnectedTo"].as<String>() == "B"){
+      client_connected_to_b = true;
+      client_connected_to_a = false;
+      rssiValues.rssiA = doc["data"]["position"]["rssiA"].as<String>();
+      rssiValues.rssiB = doc["data"]["position"]["rssiB"].as<String>();
+    }
+    else if (doc["data"]["connection_data"]["ConnectedTo"].as<String>() == "A"){
+      client_connected_to_b = false;
+      client_connected_to_a = true;
+      rssiValues.rssiA = doc["data"]["position"]["rssiA"].as<String>();
+      rssiValues.rssiB = doc["data"]["position"]["rssiB"].as<String>();
+    }
+    else if (doc["data"]["connection_data"]["ConnectedTo"].as<String>() == "reconnecting"){
+      client_connected_to_b = false;
+      client_connected_to_a = false;
+      rssiValues.rssiA = "0";
+      rssiValues.rssiB = "0";
+    }
+    else if (doc["data"]["connection_data"]["ConnectedTo"].as<String>() == "None"){
+      client_connected_to_b = false;
+      client_connected_to_a = false;
+      rssiValues.rssiA = "0";
+      rssiValues.rssiB = "0";
+    }
 
+    
+  }
+}
+
+void startFunction(AsyncWebServerRequest *request) {
+  // Code pour la fonction start
+  Serial.println("Start LED 1");
+  request->send(200, "text/plain", "Started");
+}
+
+void stopFunction(AsyncWebServerRequest *request) {
+  // Code pour la fonction stop
+  Serial.println("Stop LED 1");
+  request->send(200, "text/plain", "Stopped");
 }
 
 void HTTPSeverSetup() {
@@ -92,8 +142,27 @@ void HTTPSeverSetup() {
     response += "<p>IP Address (AP): " + WiFi.softAPIP().toString() + "</p>";
     response += "<p>(Deprecated)Internal Temperature : " + String(esp_internal_temp()) + "C</p>";
     response += "<p>Available memory : " + String(available_memory()) + " bytes</p>";
+    response += "<button onclick=\"sendRequest('/startled1')\">Start LED 1</button>";
+    response += "<button onclick=\"sendRequest('/stopled1')\">Stop LED 1</button>";
+    response += "<p id='status'></p>";
+    response += "<script>";
+    response += "function sendRequest(url) {";
+    response += "  var xhr = new XMLHttpRequest();";
+    response += "  xhr.open('GET', url, true);";
+    response += "  xhr.onreadystatechange = function () {";
+    response += "    if (xhr.readyState == 4 && xhr.status == 200)";
+    response += "      document.getElementById('status').innerHTML = xhr.responseText;";
+    response += "  };";
+    response += "  xhr.send();";
+    response += "}";
+    response += "</script>";
     request->send(200, "text/html", response);
   });
+
+  // Déclarez les routes pour les boutons
+  server.on("/startled1", HTTP_GET, startFunction);
+  server.on("/stopled1", HTTP_GET, stopFunction);
+
   // API Server
   server.on("/message", HTTP_POST, [](AsyncWebServerRequest *request){
     if (!request->authenticate(http_username, http_password))
@@ -103,8 +172,8 @@ void HTTPSeverSetup() {
     String message;
     if (request->hasParam("message", true)) {
       message = request->getParam("message", true)->value();
-      process_msg(message)
-      //Serial.println("Message reçu : " + message);
+      process_msg(message);
+      // Serial.println("Message reçu : " + message);
     }
     request->send(200, "text/plain", "Message reçu avec succès par A");
   });
@@ -114,9 +183,9 @@ void HTTPSeverSetup() {
     
 }
 
-void setup()
-{
+void setup(){
   Serial.begin(115200);
+  Serial.println("### THIS IS SERVER A ###");
   Serial.println("\n[*] Creating Access point A");
   WiFi.mode(WIFI_AP);
   WiFi.softAPConfig(local_ip, gateway, subnet);
@@ -127,14 +196,19 @@ void setup()
   
   HTTPSeverSetup();
 }
-void loop()
-{
-  if (is_this_mac_address_connected(mac_client)){
-    client_connected_to_a = true;
-  }
-  else {
-    client_connected_to_a = false;
-  }
+
+void loop(){
+  delay(5000);
+  Serial.println("RSSI A :" + String(rssiValues.rssiA) + " | RSSIB :" + String(rssiValues.rssiB));
+  // Serial.println("Connected to B : " + String(client_connected_to_b));
+  // Serial.println("Connected to A : " + String(client_connected_to_a));
+  // if (is_this_mac_address_connected(mac_client)){
+  //   client_connected_to_a = true;
+  // }
+  // else {
+  //   client_connected_to_a = false;
+  // }
+  // Serial.println(client_connected_to_b);
 
 
   //display_connected_devices();
