@@ -3,12 +3,7 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
-#include "DHT.h"
 
-
-#define DHTPIN 4
-#define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
 /// Définition des variables  ///
 // Wifi //
 // Serveur A
@@ -29,6 +24,9 @@ IPAddress actualhost;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
+
+#define SCAN_PERIOD 10000
+long lastScanMillis;
 
 // Roaming //
 char ConnectedTo;
@@ -108,9 +106,6 @@ int32_t scanAndGetRSSI(const char* ssid) {
 }
 
 RSSIValues scanAndGetRSSIs(const char* ssidA, const char* ssidB) {
-  pinMode(12, OUTPUT);
-  digitalWrite(12, HIGH);
-  Serial.println("Start scanning ...");
   RSSIValues rssiValues = {INT_MIN, INT_MIN};
   int numNetworks = WiFi.scanNetworks();
   for (int i = 0; i < numNetworks; ++i) {
@@ -122,9 +117,6 @@ RSSIValues scanAndGetRSSIs(const char* ssidA, const char* ssidB) {
       rssiValues.rssiB = WiFi.RSSI(i);
     }
   }
-  WiFi.scanDelete();
-  Serial.println("Scanning down");
-  digitalWrite(12, LOW);
   return rssiValues;
 }
 
@@ -232,45 +224,21 @@ void process_msg(String data) {
 }
 
 TaskHandle_t wifiTaskHandle;
-TaskHandle_t dht11Handle;
+bool scanInProgress = true;
 
-void wifiTask(void * parameter) {
-  for (;;) {
-    RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB); // Bloquant dans la tâche séparée
-    //Serial.print("RSSIA :" + String(rssiValues.rssiA));
-    //Serial.println(" | RSSIB :" + String(rssiValues.rssiB));
-    connectToBestWiFi(rssiValues.rssiA, rssiValues.rssiB);
-    senddata(actualhost, generateJsonMsg(rssiValues.rssiA, rssiValues.rssiB));
-    vTaskDelay(10000 / portTICK_PERIOD_MS); // Délai pour permettre le basculement des tâches
-  }
-}
-void dht11 (void * parameter) {
-  for (;;) {
-    // Reading temperature or humidity takes about 250 milliseconds!
-    // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-    float h = dht.readHumidity();
-    // Read temperature as Celsius (the default)
-    float t = dht.readTemperature();
-    // Check if any reads failed and exit early (to try again).
-    if (isnan(h) || isnan(t)) {
-      Serial.println(F("Failed to read from DHT sensor!"));
-    }
-    else{
-      DynamicJsonDocument jsonDoc(256);
-      // Ajoutez les valeurs au document JSON
-      jsonDoc["source"] = "client";
-      jsonDoc["destination"] = "servera";
-      jsonDoc["data"]["sensor"]["dht11"]["temperature"] = t;
-      jsonDoc["data"]["sensor"]["dht11"]["humidity"] = h;
-      // Convertir le document JSON en chaîne
-      String jsonString;
-      serializeJson(jsonDoc, jsonString);
-      senddata(actualhost, jsonString);
-    }
-    
-    vTaskDelay(10000);
-  }
-}
+// void wifiTask(void * parameter) {
+//   for (;;) {
+//     if (scanInProgress) {
+//       RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB); // Bloquant dans la tâche séparée
+//       //scanInProgress = false;
+//       //Serial.print("RSSIA :" + String(rssiValues.rssiA));
+//       //Serial.println(" | RSSIB :" + String(rssiValues.rssiB));
+//       connectToBestWiFi(rssiValues.rssiA, rssiValues.rssiB);
+//       senddata(actualhost, generateJsonMsg(rssiValues.rssiA, rssiValues.rssiB));
+//     }
+//     vTaskDelay(3000 / portTICK_PERIOD_MS); // Délai pour permettre le basculement des tâches
+//   }
+// }
 
 
 void setup() {
@@ -286,16 +254,38 @@ void setup() {
     request->send_P(200, "text/plain", "OK");
     }
   });
-  xTaskCreatePinnedToCore(wifiTask, "WiFi Task", 4096, NULL, 1, &wifiTaskHandle,0);
-  xTaskCreate(dht11, "dht11 sensor", 4096, NULL, 1, &dht11Handle);
+  //xTaskCreatePinnedToCore(wifiTask, "WiFi Task", 4096, NULL, 1, &wifiTaskHandle,0);
   // Start server
   server.begin();
-  dht.begin();
 }
 
 int loopcounter = 0;
 
 void loop() {
+  long currentMillis = millis();
+  // trigger Wi-Fi network scan
+  if (currentMillis - lastScanMillis > SCAN_PERIOD)
+  {
+    WiFi.scanNetworks(true);
+    Serial.print("\nScan start ... ");
+    lastScanMillis = currentMillis;
+  }
+  int n = WiFi.scanComplete();
+  if(n >= 0)
+  {
+    Serial.printf("%d network(s) found\n", n);
+    for (int i = 0; i < n; i++)
+    {
+      String foundSSID = WiFi.SSID(i);
+      if (strcmp(foundSSID.c_str(), ssidA) == 0) {
+        rssiValues.rssiA = WiFi.RSSI(i);
+      }
+      if (strcmp(foundSSID.c_str(), ssidB) == 0) {
+        rssiValues.rssiB = WiFi.RSSI(i);
+      }
+    }
+    WiFi.scanDelete();
+  }
 }
 
 

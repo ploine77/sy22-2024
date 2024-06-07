@@ -5,6 +5,7 @@
 #include <HTTPClient.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
+#include <ezButton.h>
 
 
 const char* ssid     = "servera";
@@ -21,8 +22,23 @@ IPAddress empty(0,0,0,0);
 
 
 const int verbose = 1;
-#define BUTTON_PIN 33  // GPIO25 pin connected to button
-#define SHORT_PRESS_TIME 500 // 500 milliseconds
+
+ezButton button1(33);  // create ezButton object that attach to pin 6;
+ezButton button2(32);  // create ezButton object that attach to pin 7;
+ezButton button3(27);  // create ezButton object that attach to pin 8;
+// const int BUTTON_PIN_A = 2;
+// const int BUTTON_PIN_B = 3;
+// const int BUTTON_PIN_C = 4;
+const int LED_PIN_A = 19;
+const int LED_PIN_B = 18;
+const int LED_PIN_C = 5;
+
+bool previousLedStateA = false;
+bool previousLedStateB = false;
+bool previousLedStateC = false;
+
+#define SHORT_PRESS_TIME = 50;
+
 // Variables will change:
 int lastState = LOW;  // the previous state from the input pin
 int currentState;     // the current reading from the input pin
@@ -44,6 +60,9 @@ RSSIValues rssiValues;
 
 // Create AsyncWebServer object on port 80
 AsyncWebServer server(80);
+
+float sensor_temperature;
+float sensor_humidity;
 
 void debug(String debugmessage, int verboselvl){
   if (verboselvl >= verbose){
@@ -112,7 +131,7 @@ IPAddress nexthop(String destalias){ // Il s'agit de la fonction de routage loca
 void process_msg(String data){
   // data.replace("\n", "");
   // data.replace("\r", "");
-  //Serial.print(data);
+  Serial.println(data);
   // DynamicJsonDocument doc(200); // Taille du document JSON en octets
   // deserializeJson(jsondata, data);
   // if (jsondata["Destination"].as<String>() == "serva"){
@@ -150,6 +169,10 @@ void process_msg(String data){
       rssiValues.rssiA = "0";
       rssiValues.rssiB = "0";
     }
+    if (doc["data"]["sensor"]["dht11"]){
+      sensor_temperature = doc["data"]["sensor"]["dht11"]["temperature"].as<float>();
+      sensor_humidity = doc["data"]["sensor"]["dht11"]["humidity"].as<float>();
+    }
   }
 }
 
@@ -177,7 +200,12 @@ void setup() {
   Serial.println("### THIS IS SERVER A ###\n\n");
  	// Connect to Wifi network.
  	WifiSetup();
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  // pinMode(BUTTON_PIN_A, INPUT_PULLUP);
+  // pinMode(BUTTON_PIN_B, INPUT_PULLUP);
+  // pinMode(BUTTON_PIN_C, INPUT_PULLUP);
+  button1.setDebounceTime(50); // set debounce time to 50 milliseconds
+  button2.setDebounceTime(50); // set debounce time to 50 milliseconds
+  button3.setDebounceTime(50); // set debounce time to 50 milliseconds
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     String response = "<h1>Bienvenue sur le serveur A (Master)</h1>";
     //response += "<p>IP Address (AP) : " + WiFi.softAPIP().toString() + "</p>";
@@ -189,6 +217,8 @@ void setup() {
     response += "<p>client_connected_to_a : " + String(client_connected_to_a) + "</p>";
     response += "<p>client_connected_to_b : " + String(client_connected_to_b) + "</p>";
     response += "<p>client_reconnecting : " + String(client_reconnecting) + "</p>";
+    response += "<p>Temperature : " + String(sensor_temperature) + "</p>";
+    response += "<p>Humidity : " + String(sensor_humidity) + "</p>";
     request->send(200, "text/html", response);
   });
   server.on("/API", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -203,44 +233,50 @@ void setup() {
   server.begin();
 }
 
-void buttonpress(){
-  currentState = digitalRead(BUTTON_PIN);
-
-  if (lastState == HIGH && currentState == LOW)       // button is pressed
-    pressedTime = millis();
-  else if (lastState == LOW && currentState == HIGH) { // button is released
-    releasedTime = millis();
-
-    long pressDuration = releasedTime - pressedTime;
-
-    if ( pressDuration < SHORT_PRESS_TIME )
-      Serial.println("A short press is detected");
-      String message = pincontroljson(12, !previousLedState);
-      Serial.println("Sending : " + message);
-      if (nexthop("client") != empty){
-        senddata(nexthop("client"), message);
-      }
-      //senddata(clientlocal_ip, message);
-      
-      previousLedState = !previousLedState;
-
-      
-  }
-
-  // save the the last state
-  lastState = currentState;
-}
 
 void loop(){
   //Serial.println ("In the looop");
-  buttonpress();
-  // if (client_connected_to_a){
+  button1.loop(); // MUST call the loop() function first
+  button2.loop(); // MUST call the loop() function first
+  button3.loop(); // MUST call the loop() function first
 
-  // };
-  //senddata(clientlocal_ip, "Hey");
-  delay(200);
-  //Serial.println("RSSI A : " + String(rssiValues.rssiA) + " | RSSI B : " + String(rssiValues.rssiB + "\r"));
-  //Serial.println("A : " + rssiValues.rssiA + " | B : " + rssiValues.rssiB);
-  //Serial.println("IP" + client_ip.toString());
-  
+  int btn1State = button1.getState();
+  int btn2State = button2.getState();
+  int btn3State = button3.getState();
+
+
+  // Vérifier si le bouton 1 a été cliqué
+  if (button1.isReleased()) {
+    Serial.println("Bouton 1 cliqué");
+    String message = pincontroljson(LED_PIN_A, !previousLedStateA);
+    Serial.println("Sending : " + message);
+    if (nexthop("client") != empty){
+      senddata(nexthop("client"), message);
+    }
+    previousLedStateA = !previousLedStateA;
+    //senddata(clientlocal_ip, message);
+  }
+
+  // Vérifier si le bouton 2 a été cliqué
+  if (button2.isReleased()) {
+    Serial.println("Bouton 2 cliqué");
+    String message = pincontroljson(LED_PIN_B, !previousLedStateB);
+    Serial.println("Sending : " + message);
+    if (nexthop("client") != empty){
+      senddata(nexthop("client"), message);
+    }
+    previousLedStateB = !previousLedStateB;
+  }
+
+  // Vérifier si le bouton 3 a été cliqué
+  if (button3.isReleased()) {
+    Serial.println("Bouton 3 cliqué");
+    String message = pincontroljson(LED_PIN_C, !previousLedStateC);
+    Serial.println("Sending : " + message);
+    if (nexthop("client") != empty){
+      senddata(nexthop("client"), message);
+    }
+    previousLedStateC = !previousLedStateC;
+  }
+
 }
