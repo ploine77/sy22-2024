@@ -5,112 +5,124 @@
 #include <HTTPClient.h>
 #include "DHT.h"
 
-
+// Définition des broches et du type de capteur DHT
 #define DHTPIN 4
 #define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
-/// Définition des variables  ///
-// Wifi //
+
+DHT dht(DHTPIN, DHTTYPE);  // Initialisation du capteur DHT
+
+/// Définition des variables ///
+
+// WiFi //
 // Serveur A
 const char* ssidA = "servera";
 const char* passwordA = "srvapass10";
 const char* Host_NameA = "192.168.0.1";
 IPAddress gatewayA_IP(192, 168, 0, 1);
 IPAddress localA_IP(192, 168, 0, 3);
-IPAddress subnet(255, 255, 255, 0);
+
 // Serveur B
 const char* ssidB = "serverb";
 const char* passwordB = "srvbpass10";
 const char* Host_NameB = "192.168.1.1";
 IPAddress gatewayB_IP(192, 168, 1, 1);
 IPAddress localB_IP(192, 168, 1, 3);
+
+// Subnet utilisé dans le réseau, ici /24
+IPAddress subnet(255, 255, 255, 0);
+
 // IP de la gateway actuelle
 IPAddress actualhost;
 
-// Create AsyncWebServer object on port 80
+// Création de l'objet AsyncWebServer sur le port 80
 AsyncWebServer server(80);
 
-// Roaming //
+// Variables de roaming
 char ConnectedTo;
 const char* host;
 
+// Structure pour les valeurs RSSI
 struct RSSIValues {
   int32_t rssiA;
   int32_t rssiB;
 };
 
-RSSIValues rssiValues;
+RSSIValues rssiValues;  // Instance de la structure RSSIValues
 
 // Debug //
-const int verbose = 999;
+const int verbose = 999;  // Niveau de verbosité pour les messages de debug
 
-TaskHandle_t UDPserverTask;
+// Threads Handle //
+TaskHandle_t wifiTaskHandle; // Tâche qui se connecte au meilleur wifi
+TaskHandle_t dht11Handle; // Tâche qui récupère les données du capteur DHT11 et les envoi à l'ESP A 
+
+// Délais //
+const int ScanWifi_interval = 20000; // Interval entre chaque scan de wifi
+const int DHT11_interval = 20000; // Interval entre chaque récupération des valeurs du capteur DHT11
+
+// Etat //
+bool ScanInProgress = false;
 
 
+// Fonction de debug pour afficher les messages en fonction du niveau de verbosité
 void debug(String debugmessage, int verboselvl){
   if (verbose >= verboselvl){
     Serial.println(debugmessage);
   }
 }
 
-void connectToBestWiFi(int32_t rssiA = scanAndGetRSSI(ssidA), int32_t rssiB = scanAndGetRSSI(ssidB)) {
-  // Vérifier si le RSSI de l'un ou l'autre SSID est supérieur à -120 dBm
+// Fonction pour se connecter au meilleur WiFi en fonction du RSSI
+void connectToBestWiFi(int32_t rssiA = rssiValues.rssiA, int32_t rssiB = rssiValues.rssiB) {
   if (rssiA > -120 || rssiB > -120) {
     if (rssiA > rssiB && rssiA > -120) {
       if (ConnectedTo != 'A') {
         DynamicJsonDocument jsonDoc(100);
-        // Ajoutez les valeurs au document JSON
-        jsonDoc["Source"] = "Client";
-        jsonDoc["Destination"] = "serva";
-        jsonDoc["data"]["connection_data"]["ConnectedTo"] = "reconnecting";
-        // Convertir le document JSON en chaîne
+        jsonDoc["source"] = "client";
+        jsonDoc["destination"] = "servera";
+        jsonDoc["data"]["connection_event"] = "reconnecting";
         String jsonString;
         serializeJson(jsonDoc, jsonString);
         senddata(actualhost,jsonString);
         ConnectedTo = 'A';
         connectToWiFi(ssidA, passwordA);
-        
-        actualhost = WiFi.gatewayIP();;
+        actualhost = WiFi.gatewayIP();
       }
     } else if (rssiB > -120) {
       if (ConnectedTo != 'B') {
         DynamicJsonDocument jsonDoc(100);
-        // Ajoutez les valeurs au document JSON
-        jsonDoc["Source"] = "Client";
-        jsonDoc["Destination"] = "serva";
-        jsonDoc["data"]["connection_data"]["ConnectedTo"] = "reconnecting";
-        // Convertir le document JSON en chaîne
+        jsonDoc["source"] = "client";
+        jsonDoc["destination"] = "servera";
+        jsonDoc["data"]["connection_event"] = "reconnecting";
         String jsonString;
         serializeJson(jsonDoc, jsonString);
         senddata(actualhost,jsonString);
         ConnectedTo = 'B';
         connectToWiFi(ssidB, passwordB);
-        
-        actualhost = WiFi.gatewayIP();;
+        actualhost = WiFi.gatewayIP();
       }
     } else {
-      Serial.println("Aucun réseau avec un RSSI acceptable trouvé.");
+      debug("Aucun réseau avec un RSSI acceptable trouvé.", 1);
     }
   } else {
-    Serial.println("Aucun réseau avec un RSSI acceptable trouvé.");
+    debug("Aucun réseau avec un RSSI acceptable trouvé.", 1);
   }
 }
 
-// Get the RSSI of the wifi
-int32_t scanAndGetRSSI(const char* ssid) {
-  int numNetworks = WiFi.scanNetworks();
-  for (int i = 0; i < numNetworks; ++i) {
-    if (strcmp(WiFi.SSID(i).c_str(), ssid) == 0) {
-      return WiFi.RSSI(i);
-    }
-  }
-  return INT_MIN;
-}
-
+// Fonction pour scanner et obtenir les RSSI de deux SSID
 RSSIValues scanAndGetRSSIs(const char* ssidA, const char* ssidB) {
   pinMode(12, OUTPUT);
   digitalWrite(12, HIGH);
-  Serial.println("Start scanning ...");
+  debug("Début du scan des SSIDs " + String(ssidA) + " et " + String(ssidB) + "...", 2);
+  
+  // Averti le serveur A qu'il execute un scan
+  DynamicJsonDocument jsonDoc(100);
+  jsonDoc["source"] = "client";
+  jsonDoc["destination"] = "servera";
+  jsonDoc["data"]["connection_event"] = "scanning";
+  String jsonString;
+  serializeJson(jsonDoc, jsonString);
+  senddata(actualhost,jsonString);
+  ScanInProgress = true;
   RSSIValues rssiValues = {INT_MIN, INT_MIN};
   int numNetworks = WiFi.scanNetworks();
   for (int i = 0; i < numNetworks; ++i) {
@@ -123,102 +135,92 @@ RSSIValues scanAndGetRSSIs(const char* ssidA, const char* ssidB) {
     }
   }
   WiFi.scanDelete();
-  Serial.println("Scanning down");
+  ScanInProgress = false;
+  debug("Scan terminé.", 2);
   digitalWrite(12, LOW);
   return rssiValues;
 }
 
+// Fonction pour générer un message JSON avec les valeurs RSSI
 String generateJsonMsg(int32_t rssiA, int32_t rssiB) {
-  // Déclarez un document JSON avec une taille plus grande si nécessaire
   DynamicJsonDocument jsonDoc(256);
-  // Ajoutez les valeurs au document JSON
   jsonDoc["source"] = "client";
   jsonDoc["destination"] = "servera";
   jsonDoc["data"]["position"]["rssiA"] = rssiA;
   jsonDoc["data"]["position"]["rssiB"] = rssiB;
-  // jsonDoc["data"]["connection_data"]["mac"] = WiFi.macAddress();
   jsonDoc["data"]["connection_data"]["ip"] = WiFi.localIP().toString();
   jsonDoc["data"]["connection_data"]["ConnectedTo"] = String(ConnectedTo);
 
-  // Convertir le document JSON en chaîne
   String jsonString;
   serializeJson(jsonDoc, jsonString);
 
-  // Vérifiez si la sérialisation s'est bien déroulée
   if (jsonString.length() == 0) {
-    Serial.println("Erreur: JSON vide.");
+    debug("Erreur: JSON vide.", 1);
   }
 
   return jsonString;
 }
 
+// Fonction pour se connecter au WiFi
 void connectToWiFi(const char* ssid, const char* password) {
-  Serial.print("Connexion à ");
-  Serial.println(ssid);
-  // Configures static IP address
-  if (ConnectedTo == 'A'){
+  debug("Connexion à " + String(ssid), 2);
+  if (ConnectedTo == 'A') {
     if (!WiFi.config(localA_IP, gatewayA_IP, subnet)) {
-      Serial.println("STA Failed to configure");
+      debug("Échec de la configuration STA", 1);
     }
-  }
-  else{
+  } else {
     if (!WiFi.config(localB_IP, gatewayB_IP, subnet)) {
-      Serial.println("STA Failed to configure");
+      debug("Échec de la configuration STA", 1);
     }
   }
   
   WiFi.begin(ssid, password);
 
-  unsigned long startAttemptTime = millis();  // Enregistrer le temps de début de la tentative de connexion
+  unsigned long startAttemptTime = millis();
 
-  // Attendre la connexion, mais pas plus de 5 secondes
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime <6000) {
+  // Attendre la connexion, mais pas plus de 6 secondes
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttemptTime < 6000) {
     delay(1000);
-    Serial.print(".");
+    debug(".", 3);
   }
 
-  Serial.println("");
-
   if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("Connexion établie!");
-    Serial.print("Adresse IP: ");
-    Serial.println(WiFi.localIP());
+    debug("Connexion établie! Adresse IP: " + WiFi.localIP().toString(), 2);
   } else {
-    Serial.println("Connexion échouée : délai d'attente dépassé.");
-    connectToWiFi(ssid,password);
+    debug("Connexion échouée: délai d'attente dépassé.", 1);
+    connectToWiFi(ssid, password);
   }
 }
 
+// Fonction pour envoyer des données à une adresse IP spécifique
 void senddata(IPAddress ipdestination, String data){
   if (WiFi.status() == WL_CONNECTED){
-    Serial.println("Sending packet to " + ipdestination.toString() + " at http://" + ipdestination.toString() + "/API");
+    while (ScanInProgress){ // L'envoi de donné ne peut pas avoir lieu si un scan est en cours. Il faut attendre
+      delay(500);
+    }
+    debug("Envoi du paquet " + data + " à http://" + ipdestination.toString() + "/API", 2);
     HTTPClient http;
     http.begin("http://" + ipdestination.toString() + "/API");
     http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    // Send HTTP POST request
     int httpCode = http.POST("message=" + data);
-    // httpCode will be negative on error
     if (httpCode > 0) {
-      // file found at server
       if (httpCode == HTTP_CODE_OK) {
         String payload = http.getString();
-        //Serial.println("Response : " + payload);
       } else {
-        // HTTP header has been send and Server response header has been handled
-        Serial.printf("[HTTP] POST ... code: %d\n", httpCode);
+        debug("[HTTP] POST ... code: " + String(httpCode), 2);
       }
     } else {
-      Serial.printf("[HTTP] POST ... failed, error: %s\n", http.errorToString(httpCode).c_str());
+      debug("[HTTP] POST ... failed, error: " + http.errorToString(httpCode), 1);
     }
     http.end();
   }
 }
 
-
+// Fonction pour traiter les messages reçus
 void process_msg(String data) {
   DynamicJsonDocument doc(200);
   deserializeJson(doc, data);
-  Serial.println(data);
+  debug(data, 2);
   if (doc["destination"].as<String>() == "client") {
     if (doc["data"] && doc["data"]["action"]){
       int pinnumber = doc["data"]["action"]["pinupmber"];
@@ -226,56 +228,46 @@ void process_msg(String data) {
 
       pinMode(pinnumber, OUTPUT);
       digitalWrite(pinnumber, pinstat ? HIGH : LOW);
-      Serial.println("Setting pin : " + String(pinnumber) + " to : " + String(pinstat));
+      debug("Réglage de la broche: " + String(pinnumber) + " à: " + String(pinstat), 2);
     }
   }
 }
 
-TaskHandle_t wifiTaskHandle;
-TaskHandle_t dht11Handle;
-
+// Tâche pour gérer le WiFi
 void wifiTask(void * parameter) {
   for (;;) {
-    RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB); // Bloquant dans la tâche séparée
-    //Serial.print("RSSIA :" + String(rssiValues.rssiA));
-    //Serial.println(" | RSSIB :" + String(rssiValues.rssiB));
+    RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB);
     connectToBestWiFi(rssiValues.rssiA, rssiValues.rssiB);
     senddata(actualhost, generateJsonMsg(rssiValues.rssiA, rssiValues.rssiB));
-    vTaskDelay(10000 / portTICK_PERIOD_MS); // Délai pour permettre le basculement des tâches
+    vTaskDelay(ScanWifi_interval);
   }
 }
+
+// Tâche pour gérer le capteur DHT11
 void dht11 (void * parameter) {
   for (;;) {
-    // Reading temperature or humidity takes about 250 milliseconds!
-    // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+    vTaskDelay(DHT11_interval);
     float h = dht.readHumidity();
-    // Read temperature as Celsius (the default)
     float t = dht.readTemperature();
-    // Check if any reads failed and exit early (to try again).
     if (isnan(h) || isnan(t)) {
-      Serial.println(F("Failed to read from DHT sensor!"));
-    }
-    else{
+      debug(F("Échec de la lecture du capteur DHT!"), 1);
+    } else {
       DynamicJsonDocument jsonDoc(256);
-      // Ajoutez les valeurs au document JSON
       jsonDoc["source"] = "client";
       jsonDoc["destination"] = "servera";
       jsonDoc["data"]["sensor"]["dht11"]["temperature"] = t;
       jsonDoc["data"]["sensor"]["dht11"]["humidity"] = h;
-      // Convertir le document JSON en chaîne
       String jsonString;
       serializeJson(jsonDoc, jsonString);
       senddata(actualhost, jsonString);
     }
     
-    vTaskDelay(10000);
   }
 }
 
-
 void setup() {
   Serial.begin(115200);
-  Serial.println("### THIS IS THE CLIENT ###");
+  debug("### THIS IS THE CLIENT ###", 2);
   RSSIValues rssiValues = scanAndGetRSSIs(ssidA, ssidB);
   connectToBestWiFi(rssiValues.rssiA, rssiValues.rssiB);
   server.on("/API", HTTP_POST, [](AsyncWebServerRequest *request){
@@ -283,19 +275,15 @@ void setup() {
     if (request->hasParam("message", true)) {
       message = request->getParam("message", true)->value();
       process_msg(message);
-    request->send_P(200, "text/plain", "OK");
+      request->send_P(200, "text/plain", "OK");
     }
   });
-  xTaskCreatePinnedToCore(wifiTask, "WiFi Task", 4096, NULL, 1, &wifiTaskHandle,0);
+  xTaskCreatePinnedToCore(wifiTask, "WiFi Task", 4096, NULL, 1, &wifiTaskHandle, 0);
   xTaskCreate(dht11, "dht11 sensor", 4096, NULL, 1, &dht11Handle);
-  // Start server
-  server.begin();
-  dht.begin();
+  server.begin();  // Démarrer le serveur
+  dht.begin();  // Initialiser le capteur DHT
 }
-
-int loopcounter = 0;
 
 void loop() {
+  // Boucle vide
 }
-
-
