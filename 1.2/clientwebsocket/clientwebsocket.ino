@@ -57,8 +57,8 @@ TaskHandle_t wifiTaskHandle; // Tâche qui se connecte au meilleur wifi
 TaskHandle_t dht11Handle; // Tâche qui récupère les données du capteur DHT11 et les envoi à l'ESP A 
 
 // Délais //
-const int ScanWifi_interval = 20000; // Interval entre chaque scan de wifi
-const int DHT11_interval = 20000; // Interval entre chaque récupération des valeurs du capteur DHT11
+const int ScanWifi_interval = 12000; // Interval entre chaque scan de wifi
+const int DHT11_interval = 8000; // Interval entre chaque récupération des valeurs du capteur DHT11
 
 // Etat //
 bool ScanInProgress = false;
